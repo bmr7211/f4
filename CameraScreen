@@ -1,0 +1,234 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Modal,
+  Alert, Image,
+} from 'react-native';
+import { Camera, useCameraDevices } from 'react-native-vision-camera';
+import * as Location from 'expo-location';
+
+const CameraScreen = () => {
+  const cameraRef = useRef<Camera>(null);
+  const devices = useCameraDevices();
+  const device = devices.back;
+  const [hasPermission, setHasPermission] = useState(false);
+  const [locationText, setLocationText] = useState('위치 불러오는 중...');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [showWarning, setShowWarning] = useState(false);
+  const [detectedAnimal, setDetectedAnimal] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      // 카메라 권한 요청
+      const cameraPermission = await Camera.requestCameraPermission();
+      // 위치 권한 요청
+      const locationPermission = await Location.requestForegroundPermissionsAsync();
+
+      if (cameraPermission === 'authorized' &&
+      locationPermission.status === 'granted') {
+        setHasPermission(true);
+
+        // 위치 가져오기
+        const location = await Location.getCurrentPositionAsync({});
+        const geocode = await Location.reverseGeocodeAsync(location.coords);
+        if (geocode.length > 0) {
+          const loc = geocode[0];
+          const address = `${loc.region} ${loc.city} ${loc.street || ''}`;
+          setLocationText(address);
+        }
+      } else {
+        Alert.alert('권한 부족', '카메라 또는 위치 권한이 필요합니다.');
+      }
+    })();
+  }, []);
+
+  const handleTakePicture = async () => {
+    if (cameraRef.current && device) {
+      try {
+        const photo = await cameraRef.current.takePhoto({
+        });
+        setPhotoUri('file://' + photo.path);
+
+        // AI 인식 시뮬레이션
+        const aiRecognized = Math.random() > 0.5;
+        if (aiRecognized) {
+          setDetectedAnimal('고라니');
+        } else {
+          setShowWarning(true);
+          setDetectedAnimal(null);
+        }
+      } catch (error) {
+        Alert.alert('오류', '사진 촬영에 실패했습니다.');
+      }
+    }
+  };
+
+  if (!device) {
+    return (
+      <View style={styles.container}>
+        <Text>카메라 디바이스를 불러오는 중입니다...</Text>
+      </View>
+    );
+  }
+  
+
+  if (!hasPermission) {
+    return (
+      <View style={styles.container}>
+        <Text>카메라 및 위치 권한이 필요합니다.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* 위치 표시 */}
+      <View style={styles.locationContainer}>
+        <Text style={styles.locationText}>{locationText}</Text>
+      </View>
+
+      {/* 카메라 화면 */}
+      <View style={styles.cameraContainer}>
+        <Camera
+          ref={cameraRef}
+          style={styles.camera}
+          device={device}
+          isActive={!photoUri}
+          photo={true}
+        />
+
+        {photoUri && (
+          <View style={styles.previewOverlay}>
+            <Image source={{ uri: photoUri }} style={styles.previewImage} />
+            {detectedAnimal ? (
+              <View style={styles.detectedBox}>
+                <Text style={styles.detectedText}>{detectedAnimal}가 인식되었습니다</Text>
+                <TouchableOpacity style={styles.reportButton}>
+                  <Text style={styles.reportText}>신고하기</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        )}
+      </View>
+
+      {/* 인식 실패 팝업 */}
+      <Modal visible={showWarning} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.warningBox}>
+            <Text style={styles.warningTitle}>⚠ 경고 알림</Text>
+            <Text style={styles.warningText}>사진을 인식할 수 없습니다</Text>
+            <TouchableOpacity onPress={() => setShowWarning(false)}>
+              <Text style={{ color: 'white', marginTop: 10 }}>닫기</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 하단 버튼 */}
+      <View style={styles.buttonRow}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => {
+            setPhotoUri(null);
+            setDetectedAnimal(null);
+          }}
+        >
+          <Text>재촬영</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.captureButton} onPress={handleTakePicture} />
+
+        <TouchableOpacity style={styles.secondaryButton}>
+          <Text>갤러리</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  locationContainer: {
+    padding: 10,
+    backgroundColor: '#FBC02D',
+    alignItems: 'center',
+  },
+  locationText: { fontSize: 16, fontWeight: 'bold' },
+  cameraContainer: { flex: 1, position: 'relative' },
+  camera: { flex: 1 },
+  previewOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  detectedBox: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  detectedText: {
+    color: 'white',
+    fontSize: 18,
+    marginBottom: 10,
+  },
+  reportButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  reportText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  warningBox: {
+    backgroundColor: '#D32F2F',
+    padding: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  warningTitle: {
+    color: 'white',
+    fontSize: 18,
+    marginBottom: 5,
+    fontWeight: 'bold',
+  },
+  warningText: {
+    color: 'white',
+    fontSize: 16,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  captureButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+    borderWidth: 4,
+    borderColor: '#000',
+  },
+  secondaryButton: {
+    padding: 10,
+    backgroundColor: '#eee',
+    borderRadius: 8,
+  },
+});
+
+export default CameraScreen;
