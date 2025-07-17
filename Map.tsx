@@ -1,3 +1,4 @@
+// Map.tsx
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import {
   View,
@@ -9,8 +10,9 @@ import {
   Dimensions,
   Image,
   Alert,
+  Keyboard,
 } from 'react-native';
-import MapView from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import Animated, {
   useAnimatedStyle,
@@ -20,12 +22,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { GOOGLE_API_KEY } from '@env';
 
 interface SearchHistoryItem {
   id: number;
   keyword: string;
 }
-
 interface AnimalInfo {
   name: string;
   english: string;
@@ -33,35 +35,59 @@ interface AnimalInfo {
   features: string[];
   precautions: string[];
 }
+interface PlaceItem {
+  id: string;
+  type: string;
+  location: string;
+  lat: number;
+  lng: number;
+}
 
 const windowHeight = Dimensions.get('window').height;
 const windowWidth = Dimensions.get('window').width;
-
 const BACKEND_URL = 'http://10.0.2.2:8000/api';
 
 export default function Map() {
+  // BottomSheet, MapView, 애니메이션 등 ref/state 준비
   const bottomSheetRef = useRef<BottomSheet>(null);
+  const mapRef = useRef<MapView>(null);
   const snapPoints = useMemo(
     () => [windowHeight * 0.33, windowHeight * 0.75],
     [],
   );
-  const [tab, setTab] = useState<'장소' | '정보'>('장소');
   const animatedPosition = useSharedValue(0);
 
-  // 검색 기록, 검색 상태
+  // 탭, 검색창, 기록, 동물 정보, 장소 리스트
+  const [tab, setTab] = useState<'장소' | '정보'>('장소');
   const [input, setInput] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  // 동물 정보
   const [animalInfo, setAnimalInfo] = useState<AnimalInfo | null>(null);
+  const [savedPlaces, setSavedPlaces] = useState<PlaceItem[]>([
+    {
+      id: 'init1',
+      type: '카페',
+      location: '서울특별시 중구 을지로 100',
+      lat: 37.5665,
+      lng: 126.978,
+    },
+    {
+      id: 'init2',
+      type: '공원',
+      location: '서울특별시 성동구 왕십리로 20',
+      lat: 37.5635,
+      lng: 127.036,
+    },
+  ]);
+  const [region, setRegion] = useState({
+    latitude: savedPlaces[0].lat,
+    longitude: savedPlaces[0].lng,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
+  });
 
-  // 지도 마커용 예시(임시)
-  const savedPlaces = [{ id: '1', type: '카페', location: '20' }];
-  const searchedAnimals = [{ id: 'a1', name: '고라니', date: '2024-06-27' }];
-
-  // 배너 애니메이션
+  // 애니메이션
   const bannerAnimatedStyle = useAnimatedStyle(() => {
     const bannerHeight = 54,
       extraMargin = 20;
@@ -77,7 +103,7 @@ export default function Map() {
     return { top };
   });
 
-  // 중복 검색 기록 제거
+  // 중복 기록 제거
   function getUniqueHistory(historyArr: SearchHistoryItem[]) {
     const seen = new Set<string>();
     return historyArr.filter(item => {
@@ -87,11 +113,23 @@ export default function Map() {
     });
   }
 
-  // 검색 기록 불러오기
+  // 기록 불러오기
   useEffect(() => {
     fetchHistory();
   }, []);
+  useEffect(() => {
+    if (savedPlaces.length > 0) {
+      const last = savedPlaces[savedPlaces.length - 1];
+      setRegion({
+        latitude: last.lat,
+        longitude: last.lng,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+    }
+  }, [savedPlaces]);
 
+  // 검색 기록 fetch
   async function fetchHistory() {
     try {
       const res = await fetch(`${BACKEND_URL}/search-history`);
@@ -103,8 +141,35 @@ export default function Map() {
     }
   }
 
-  // 검색 (동물 정보 요청 + 기록 저장)
+  // 검색(동물 or 장소)
   async function handleSearch(keyword: string) {
+    const animalList = [
+      '고라니',
+      '멧돼지',
+      '청설모',
+      '다람쥐',
+      '너구리',
+      '반달가슴곰',
+      '노루',
+      '멧토끼',
+      '족제비',
+      '왜가리',
+      '중대백로',
+    ];
+    const trimmed = keyword.trim();
+    const isAnimal = animalList.includes(trimmed);
+
+    if (!trimmed) return;
+    Keyboard.dismiss();
+    if (isAnimal) {
+      await searchAnimal(trimmed);
+    } else {
+      await searchPlace(trimmed);
+    }
+  }
+
+  // 동물 검색
+  async function searchAnimal(keyword: string) {
     const url = `${BACKEND_URL}/animal-info?name=${encodeURIComponent(
       keyword,
     )}`;
@@ -115,7 +180,7 @@ export default function Map() {
       if (!infoRes.ok || !infoData.name) throw new Error('정보 없음');
       setAnimalInfo(infoData);
 
-      // 기록 저장 (POST, 중복 방지)
+      // 검색 기록 저장
       const unique = getUniqueHistory(history);
       if (!unique.find(h => h.keyword === keyword)) {
         await fetch(`${BACKEND_URL}/search-history`, {
@@ -125,7 +190,6 @@ export default function Map() {
         });
         fetchHistory();
       }
-
       setDropdownOpen(false);
       setSelectedId(null);
     } catch (e) {
@@ -134,7 +198,76 @@ export default function Map() {
     }
   }
 
-  // 기록 선택시: 동물 정보 불러오기
+  // 장소 검색
+  async function searchPlace(keyword: string) {
+    try {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(
+          keyword,
+        )}&language=ko&key=${GOOGLE_API_KEY}`,
+      );
+      const data = await res.json();
+
+      // console.log('장소검색 data:', data);
+
+      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+        Alert.alert('에러', data.error_message || 'API 오류 발생');
+        return;
+      }
+
+      if (data.results && data.results.length > 0) {
+        const place = data.results[0];
+
+        // 지도 이동
+        mapRef.current?.animateToRegion(
+          {
+            latitude: place.geometry.location.lat,
+            longitude: place.geometry.location.lng,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          },
+          1000,
+        );
+
+        // 장소 저장
+        setSavedPlaces(prev => {
+          const already = prev.find(p => p.id === place.place_id);
+          if (already) return prev;
+          return [
+            ...prev,
+            {
+              id: place.place_id,
+              type: place.name,
+              location: place.formatted_address,
+              lat: place.geometry.location.lat,
+              lng: place.geometry.location.lng,
+            },
+          ];
+        });
+
+        // 검색 기록 저장
+        const unique = getUniqueHistory(history);
+        if (!unique.find(h => h.keyword === keyword)) {
+          await fetch(`${BACKEND_URL}/search-history`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword }),
+          });
+          fetchHistory();
+        }
+
+        setDropdownOpen(false);
+        setSelectedId(null);
+        Alert.alert('장소가 저장되었습니다!');
+      } else {
+        Alert.alert('장소를 찾을 수 없습니다.');
+      }
+    } catch (e) {
+      Alert.alert('검색 실패', '장소 검색에 실패했습니다.');
+    }
+  }
+
+  // 기록 선택
   async function handleSelectHistory(id: number, keyword: string) {
     setInput(keyword);
     setSelectedId(id);
@@ -157,16 +290,22 @@ export default function Map() {
     <View style={styles.container}>
       {/* 지도 */}
       <MapView
+        ref={mapRef}
         style={styles.map}
-        initialRegion={{
-          latitude: 37.5665,
-          longitude: 126.978,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        }}
+        region={region}
+        onRegionChangeComplete={setRegion}
         showsUserLocation={true}
-      />
-      {/* 상단 검색 바 */}
+      >
+        {savedPlaces.map(place => (
+          <Marker
+            key={place.id}
+            coordinate={{ latitude: place.lat, longitude: place.lng }}
+            title={place.type}
+            description={place.location}
+          />
+        ))}
+      </MapView>
+      {/* 검색 바 */}
       <View style={styles.searchBarWrapper}>
         <View style={styles.searchBar}>
           <Ionicons
@@ -191,9 +330,6 @@ export default function Map() {
             <FlatList
               data={getUniqueHistory(history)}
               keyExtractor={item => item.id.toString()}
-              contentContainerStyle={{
-                paddingVertical: 2, // 위아래 살짝 띄움
-              }}
               renderItem={({ item, index }) => {
                 const uniqueHistory = getUniqueHistory(history);
                 const isFirst = index === 0;
@@ -359,13 +495,14 @@ export default function Map() {
               </View>
               <Text style={styles.animalSectionTitle}>대처법</Text>
               <View style={{ marginLeft: 8 }}>
-                {(animalInfo.precautions || []).map(
-                  (txt: string, i: number) => (
-                    <Text key={i} style={styles.animalPrecaution}>
-                      • {txt}
-                    </Text>
-                  ),
-                )}
+                {(Array.isArray(animalInfo.precautions)
+                  ? animalInfo.precautions
+                  : []
+                ).map((txt: string, i: number) => (
+                  <Text key={i} style={styles.animalPrecaution}>
+                    • {txt}
+                  </Text>
+                ))}
               </View>
             </View>
           ) : (
@@ -379,7 +516,7 @@ export default function Map() {
   );
 }
 
-// styles
+// 아래 스타일 코드는 그대로 복사해서 사용하세요!
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f1ea' },
   map: { ...StyleSheet.absoluteFillObject },
@@ -406,7 +543,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   searchInput: { flex: 1, fontSize: 16, color: '#222' },
-  // styles
   dropdown: {
     backgroundColor: '#fff',
     borderRadius: 18,
@@ -424,7 +560,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     padding: 0,
     overflow: 'hidden',
-    // overflow: 'hidden', // 이 줄이 있으면 안쪽이 잘려서 넣지 마세요!
   },
   dropdownItem: {
     flexDirection: 'row',
@@ -435,17 +570,9 @@ const styles = StyleSheet.create({
     borderColor: '#f1f1f1',
     backgroundColor: '#fff',
   },
-  dropdownItemFirst: {
-    // 맨 위 아이템만 위쪽 살짝 띄움
-    marginTop: 2,
-  },
-  dropdownItemLast: {
-    borderBottomWidth: 0, // 마지막 아이템은 밑줄 없음
-    // marginBottom: 2, // 아래 살짝 띄움
-  },
-  dropdownItemActive: {
-    backgroundColor: '#faf7e9', // 노란빛 배경
-  },
+  dropdownItemFirst: { marginTop: 2 },
+  dropdownItemLast: { borderBottomWidth: 0 },
+  dropdownItemActive: { backgroundColor: '#faf7e9' },
   dropdownText: {
     fontSize: 17,
     color: '#444',
